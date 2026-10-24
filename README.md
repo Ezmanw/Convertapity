@@ -30,13 +30,14 @@ Needs a 64-bit ARM phone (nearly every modern Android phone).
 Needs JDK 17 and Android SDK 35.
 
 ```
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 
-APK: `app/build/outputs/apk/debug/app-debug.apk`
+APK: `app/build/outputs/apk/release/app-release.apk`
 
 ## Notes
 
+- The release APK is signed with the keystore committed at `app/release.jks` (password `convertapity`), so updates install over older builds. It is not a secret; use your own keystore if you distribute this widely.
 - The app targets SDK 28 on purpose. Android 10+ stops apps targeting 29+ from running a downloaded
   binary, and this app runs ffmpeg as one. That's fine for installing the APK yourself, but it
   rules out Google Play.

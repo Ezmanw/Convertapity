@@ -17,9 +17,21 @@ android {
         versionName = "1.0"
     }
 
+    // Committed keystore so every CI build is signed with the same key (updates install over each other).
+    // Fine for sideloading a hobby app; use a private keystore if you ever publish it elsewhere.
+    signingConfigs {
+        create("release") {
+            storeFile = file("release.jks")
+            storePassword = "convertapity"
+            keyAlias = "convertapity"
+            keyPassword = "convertapity"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

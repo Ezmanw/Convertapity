@@ -21,8 +21,8 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon
 
       # The app downloads this binary on first launch (see FfmpegManager.kt)
       - name: Fetch static arm64 ffmpeg
@@ -35,15 +35,15 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Convertapity-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Convertapity-release
+          path: app/build/outputs/apk/release/app-release.apk
 
       # Publish APK + ffmpeg binary as the v1 release (re-created at the current commit each run)
       - name: Publish v1 release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Convertapity-v1.apk
+          cp app/build/outputs/apk/release/app-release.apk Convertapity-v1.apk
           gh release delete v1 --cleanup-tag --yes || true
           gh release create v1 Convertapity-v1.apk ffmpeg-arm64 \
             --target "$GITHUB_SHA" \
