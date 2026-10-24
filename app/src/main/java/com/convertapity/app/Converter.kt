@@ -53,9 +53,9 @@ class Converter(private val context: Context, private val ffmpeg: FfmpegManager)
             // ffmpeg is a separate process and can't read content:// URIs, so stage the input
             context.contentResolver.openInputStream(input)!!.use { i -> inFile.outputStream().use { i.copyTo(it) } }
 
-            val args = listOf(ffmpeg.file.absolutePath, "-nostdin", "-progress", "pipe:1", "-nostats") +
+            val args = listOf("-nostdin", "-progress", "pipe:1", "-nostats") +
                 CommandBuilder.build(inFile.absolutePath, outFile.absolutePath, format, options)
-            val p = ProcessBuilder(args).redirectErrorStream(true).start()
+            val p = ffmpeg.process(args).start()
             process = p
 
             val log = ArrayDeque<String>()

@@ -24,14 +24,10 @@ jobs:
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon
 
-      # The app downloads this binary on first launch (see FfmpegManager.kt)
-      - name: Fetch static arm64 ffmpeg
-        run: |
-          curl -fL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz -o ffmpeg.tar.xz
-          mkdir ffmpeg-extract && tar -xJf ffmpeg.tar.xz -C ffmpeg-extract --strip-components=1
-          cp ffmpeg-extract/ffmpeg ffmpeg-arm64
-          chmod +x ffmpeg-arm64
-          ./ffmpeg-extract/ffmpeg -version >/dev/null 2>&1 || file ffmpeg-arm64
+      # The app downloads this on first launch (see FfmpegManager.kt).
+      # Android-native ffmpeg from Termux's package repo, plus the shared libs it needs.
+      - name: Package ffmpeg for Android
+        run: python3 scripts/package_ffmpeg.py ffmpeg-arm64.zip
 
       - uses: actions/upload-artifact@v4
         with:
@@ -45,7 +41,7 @@ jobs:
         run: |
           cp app/build/outputs/apk/release/app-release.apk Convertapity-v1.apk
           gh release delete v1 --cleanup-tag --yes || true
-          gh release create v1 Convertapity-v1.apk ffmpeg-arm64 \
+          gh release create v1 Convertapity-v1.apk ffmpeg-arm64.zip \
             --target "$GITHUB_SHA" \
             --title "Convertapity v1" \
-            --notes "Install Convertapity-v1.apk. The app downloads ffmpeg-arm64 from this release on first launch."
+            --notes "Install Convertapity-v1.apk. The app downloads ffmpeg-arm64.zip from this release on first launch."
