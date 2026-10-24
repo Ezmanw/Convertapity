@@ -1,0 +1,57 @@
+name: Build & release v1
+
+on:
+  push:
+    branches: [main, ccr-4bbc04df-4qqdpz]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The official ffmpeg-kit artifacts are gone from Maven Central, so the AAR comes from
+      # app/libs/ if committed, otherwise from the FFMPEG_KIT_AAR_URL repository variable.
+      - name: Fetch FFmpegKit AAR
+        env:
+          AAR_URL: ${{ vars.FFMPEG_KIT_AAR_URL }}
+        run: |
+          if ls app/libs/*.aar >/dev/null 2>&1; then
+            echo "Using committed AAR"
+          elif [ -n "$AAR_URL" ]; then
+            curl -fL "$AAR_URL" -o app/libs/ffmpeg-kit.aar
+          else
+            echo "::error::No FFmpegKit AAR. Commit one to app/libs/ or set the FFMPEG_KIT_AAR_URL repo variable (Settings > Secrets and variables > Actions > Variables)."
+            exit 1
+          fi
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Convertapity-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Publish the APK as the v1 release (re-created at the current commit on every run)
+      - name: Publish v1 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Convertapity-v1.apk
+          gh release delete v1 --cleanup-tag --yes || true
+          gh release create v1 Convertapity-v1.apk \
+            --target "$GITHUB_SHA" \
+            --title "Convertapity v1" \
+            --notes "Debug build of commit $GITHUB_SHA"
