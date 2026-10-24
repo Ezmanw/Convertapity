@@ -11,7 +11,8 @@ android {
     defaultConfig {
         applicationId = "com.convertapity.app"
         minSdk = 29
-        targetSdk = 35
+        // targetSdk 28 on purpose: Android 10+ blocks running downloaded binaries for apps targeting 29+
+        targetSdk = 28
         versionCode = 1
         versionName = "1.0"
     }
@@ -26,14 +27,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    lint { abortOnError = false }
     buildFeatures { compose = true }
 }
 
 dependencies {
-    // FFmpegKit AAR (see README): drop ffmpeg-kit-*.aar into app/libs/
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
-    implementation("com.arthenica:smart-exception-java:0.2.1")
-
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")

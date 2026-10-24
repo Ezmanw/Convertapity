@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -26,6 +27,7 @@ fun ConvertScreen(vm: ConvertViewModel = viewModel()) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(vm::pick)
     }
+    val saver = rememberLauncherForActivityResult(CreateFile) { uri -> uri?.let(vm::start) }
     val o = s.options
     val kind = s.format.kind
 
@@ -36,6 +38,24 @@ fun ConvertScreen(vm: ConvertViewModel = viewModel()) {
             Modifier.padding(pad).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (!s.ffmpegSupported) {
+                Card(Modifier.fillMaxWidth()) { Text("This device isn't 64-bit ARM, so the bundled ffmpeg can't run here.", Modifier.padding(16.dp)) }
+            } else if (!s.ffmpegReady) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Converter engine needed", style = MaterialTheme.typography.titleMedium)
+                        Text("Convertapity needs to download ffmpeg (about 40 MB) once before it can convert anything.")
+                        if (s.downloading) {
+                            val p = s.downloadProgress
+                            if (p == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                            else LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+                        } else {
+                            Button(onClick = vm::downloadFfmpeg) { Icon(Icons.Default.Download, null); Spacer(Modifier.width(8.dp)); Text("Download ffmpeg") }
+                        }
+                    }
+                }
+            }
+
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(s.inputName ?: "No file selected", style = MaterialTheme.typography.titleMedium)
@@ -87,7 +107,7 @@ fun ConvertScreen(vm: ConvertViewModel = viewModel()) {
                 else LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
                 Button(onClick = vm::cancel, Modifier.fillMaxWidth()) { Icon(Icons.Default.Stop, null); Spacer(Modifier.width(8.dp)); Text("Cancel") }
             } else {
-                Button(onClick = vm::start, enabled = s.input != null, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { saver.launch(s.format.mime to vm.suggestedName()) }, enabled = s.input != null && s.ffmpegReady, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text("Convert")
                 }
             }
@@ -133,4 +153,16 @@ private fun SliderRow(title: String, value: String, v: Float, range: ClosedFloat
         }
         Slider(value = v, onValueChange = onChange, valueRange = range, steps = steps)
     }
+}
+
+/** Like CreateDocument, but the MIME type can change per call. Input is (mime, suggested file name). */
+private val CreateFile = object : androidx.activity.result.contract.ActivityResultContract<Pair<String, String>, android.net.Uri?>() {
+    override fun createIntent(context: android.content.Context, input: Pair<String, String>) =
+        android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(android.content.Intent.CATEGORY_OPENABLE)
+            .setType(input.first)
+            .putExtra(android.content.Intent.EXTRA_TITLE, input.second)
+
+    override fun parseResult(resultCode: Int, intent: android.content.Intent?) =
+        intent.takeIf { resultCode == android.app.Activity.RESULT_OK }?.data
 }

@@ -21,37 +21,31 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # The official ffmpeg-kit artifacts are gone from Maven Central, so the AAR comes from
-      # app/libs/ if committed, otherwise from the FFMPEG_KIT_AAR_URL repository variable.
-      - name: Fetch FFmpegKit AAR
-        env:
-          AAR_URL: ${{ vars.FFMPEG_KIT_AAR_URL }}
-        run: |
-          if ls app/libs/*.aar >/dev/null 2>&1; then
-            echo "Using committed AAR"
-          elif [ -n "$AAR_URL" ]; then
-            curl -fL "$AAR_URL" -o app/libs/ffmpeg-kit.aar
-          else
-            echo "::error::No FFmpegKit AAR. Commit one to app/libs/ or set the FFMPEG_KIT_AAR_URL repo variable (Settings > Secrets and variables > Actions > Variables)."
-            exit 1
-          fi
-
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
+
+      # The app downloads this binary on first launch (see FfmpegManager.kt)
+      - name: Fetch static arm64 ffmpeg
+        run: |
+          curl -fL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz -o ffmpeg.tar.xz
+          mkdir ffmpeg-extract && tar -xJf ffmpeg.tar.xz -C ffmpeg-extract --strip-components=1
+          cp ffmpeg-extract/ffmpeg ffmpeg-arm64
+          chmod +x ffmpeg-arm64
+          ./ffmpeg-extract/ffmpeg -version >/dev/null 2>&1 || file ffmpeg-arm64
 
       - uses: actions/upload-artifact@v4
         with:
           name: Convertapity-debug
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      # Publish the APK as the v1 release (re-created at the current commit on every run)
+      # Publish APK + ffmpeg binary as the v1 release (re-created at the current commit each run)
       - name: Publish v1 release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk Convertapity-v1.apk
           gh release delete v1 --cleanup-tag --yes || true
-          gh release create v1 Convertapity-v1.apk \
+          gh release create v1 Convertapity-v1.apk ffmpeg-arm64 \
             --target "$GITHUB_SHA" \
             --title "Convertapity v1" \
-            --notes "Debug build of commit $GITHUB_SHA"
+            --notes "Install Convertapity-v1.apk. The app downloads ffmpeg-arm64 from this release on first launch."

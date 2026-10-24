@@ -35,7 +35,7 @@ object CommandBuilder {
             if (f == OutputFormat.WEBM) {
                 a += listOf("-c:v", "libvpx-vp9", "-crf", o.quality.toString(), "-b:v", "0")
             } else {
-                a += listOf("-c:v", "mpeg4", "-q:v", crfToQscale(o.quality).toString())
+                a += listOf("-c:v", "libx264", "-preset", "veryfast", "-crf", o.quality.toString(), "-pix_fmt", "yuv420p")
             }
         }
         if (o.includeAudio) {
@@ -72,6 +72,4 @@ object CommandBuilder {
         if (f == OutputFormat.JPG) a += listOf("-q:v", "2")
     }
 
-    // CRF 18..40 -> mpeg4 qscale 2..15 (the bundled mpeg4 encoder has no CRF)
-    private fun crfToQscale(crf: Int): Int = ((crf - 18) * 13 / 22 + 2).coerceIn(2, 15)
 }

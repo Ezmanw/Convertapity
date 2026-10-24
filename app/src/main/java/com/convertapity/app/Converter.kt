@@ -1,19 +1,12 @@
 package com.convertapity.app
 
-import android.content.ContentValues
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.Environment
-import android.provider.MediaStore
 import android.provider.OpenableColumns
-import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFmpegKitConfig
-import com.arthenica.ffmpegkit.FFmpegSession
-import com.arthenica.ffmpegkit.ReturnCode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 sealed interface Result {
     data class Success(val name: String) : Result
@@ -21,7 +14,10 @@ sealed interface Result {
     data object Cancelled : Result
 }
 
-class Converter(private val context: Context) {
+class Converter(private val context: Context, private val ffmpeg: FfmpegManager) {
+
+    @Volatile private var process: Process? = null
+    @Volatile private var cancelled = false
 
     fun displayName(uri: Uri): String =
         context.contentResolver.query(uri, null, null, null, null)?.use { c ->
@@ -38,59 +34,57 @@ class Converter(private val context: Context) {
         }
     } catch (_: Exception) { 0L }
 
-    fun cancel() = FFmpegKit.cancel()
+    fun cancel() { cancelled = true; process?.destroy() }
 
     suspend fun convert(
         input: Uri,
+        output: Uri,
         format: OutputFormat,
         options: Options,
         onProgress: (Float?) -> Unit,
-    ): Result {
+    ): Result = withContext(Dispatchers.IO) {
+        cancelled = false
         val total = durationMs(input)
-        val baseName = displayName(input).substringBeforeLast('.')
-        val outName = "$baseName.${format.ext}"
-        val tmp = File(context.cacheDir, "out_${System.currentTimeMillis()}.${format.ext}")
-        val inPath = FFmpegKitConfig.getSafParameterForRead(context, input)
-        val args = CommandBuilder.build(inPath, tmp.absolutePath, format, options)
+        val stamp = System.currentTimeMillis()
+        val ext = displayName(input).substringAfterLast('.', "bin")
+        val inFile = File(context.cacheDir, "in_$stamp.$ext")
+        val outFile = File(context.cacheDir, "out_$stamp.${format.ext}")
+        try {
+            // ffmpeg is a separate process and can't read content:// URIs, so stage the input
+            context.contentResolver.openInputStream(input)!!.use { i -> inFile.outputStream().use { i.copyTo(it) } }
 
-        val session: FFmpegSession = suspendCoroutine { cont ->
-            FFmpegKit.executeWithArgumentsAsync(
-                args.toTypedArray(),
-                { cont.resume(it) },
-                null,
-                { stats ->
-                    onProgress(if (total > 0) (stats.time / total.toFloat()).coerceIn(0f, 1f) else null)
-                },
-            )
-        }
+            val args = listOf(ffmpeg.file.absolutePath, "-nostdin", "-progress", "pipe:1", "-nostats") +
+                CommandBuilder.build(inFile.absolutePath, outFile.absolutePath, format, options)
+            val p = ProcessBuilder(args).redirectErrorStream(true).start()
+            process = p
 
-        return when {
-            ReturnCode.isSuccess(session.returnCode) -> {
-                try {
-                    saveToDownloads(tmp, outName, format.mime)
-                    Result.Success(outName)
-                } catch (e: Exception) {
-                    Result.Failure("Could not save file: ${e.message}")
-                } finally { tmp.delete() }
+            val log = ArrayDeque<String>()
+            p.inputStream.bufferedReader().forEachLine { line ->
+                when {
+                    line.startsWith("out_time_us=") || line.startsWith("out_time_ms=") -> {
+                        val us = line.substringAfter('=').toLongOrNull()
+                        if (us != null && total > 0) onProgress((us / 1000f / total).coerceIn(0f, 1f))
+                    }
+                    line.contains('=') && line.substringBefore('=').all { it.isLetterOrDigit() || it == '_' } -> Unit
+                    line.isNotBlank() -> { log.addLast(line); if (log.size > 4) log.removeFirst() }
+                }
             }
-            ReturnCode.isCancel(session.returnCode) -> { tmp.delete(); Result.Cancelled }
-            else -> {
-                tmp.delete()
-                val log = session.allLogsAsString.orEmpty().lines().filter { it.isNotBlank() }.takeLast(4)
-                Result.Failure(log.joinToString("\n").ifEmpty { "ffmpeg failed (code ${session.returnCode})" })
-            }
-        }
-    }
+            val code = p.waitFor()
+            process = null
 
-    private fun saveToDownloads(file: File, name: String, mime: String) {
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, name)
-            put(MediaStore.Downloads.MIME_TYPE, mime)
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Convertapity")
+            when {
+                cancelled -> Result.Cancelled
+                code != 0 -> Result.Failure(log.joinToString("\n").ifEmpty { "ffmpeg exited with code $code" })
+                else -> {
+                    context.contentResolver.openOutputStream(output, "wt")!!.use { o -> outFile.inputStream().use { it.copyTo(o) } }
+                    Result.Success(displayName(output))
+                }
+            }
+        } catch (e: Exception) {
+            if (cancelled) Result.Cancelled else Result.Failure(e.message ?: e.toString())
+        } finally {
+            process = null
+            inFile.delete(); outFile.delete()
         }
-        val resolver = context.contentResolver
-        val dest = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: error("MediaStore insert failed")
-        resolver.openOutputStream(dest)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
     }
 }
